@@ -1,20 +1,12 @@
 // ============================================================================
-// CONFIGURATION - Drive Folder URLs
+// CONFIGURATION - Config Sheet
 // ============================================================================
-// To find a folder URL: Open the folder in Drive, copy the full URL
-// URL format: https://drive.google.com/drive/folders/{FOLDER_ID}
-
-// TODO: change these to be dynamic based on the grade level or series
-const PARENT_FOLDERS = {
-  // Parent folder containing all lesson workspace folders
-  WORKSPACES_ROOT: 'https://drive.google.com/drive/folders/1UetXJ8BXSvkjadKsve0pLGCVkipN52b8?usp=drive_link',
-
-  // Parent folder containing all lesson version folders
-  VERSIONS_ROOT: 'https://drive.google.com/drive/folders/1acCgaNU88gnyp4sqd-Cr9duLUjkipfgT?usp=drive_link',
-
-  // Parent folder containing all lesson published folders
-  PUBLISHED_ROOT: 'https://drive.google.com/drive/folders/1cEzXD5bo0nkbUfZNeoENQQruPqJsdp_a?usp=drive_link'
-};
+// The "config" sheet contains parent folder URLs for each lesson sheet.
+// Structure (tab-separated):
+//   sheet | workspace_root | versions_root | published_root
+//   1st   | https://...    | https://...   | https://...
+//
+// Each row after the header corresponds to a sheet name and its folder URLs.
 
 // ============================================================================
 // CONFIGURATION - Column Headers
@@ -93,16 +85,23 @@ function publishLesson() {
   Logger.log('=== Starting publishLesson ===');
 
   try {
+    const sheet = SpreadsheetApp.getActiveSheet();
+    const sheetName = sheet.getName();
+    Logger.log(`Active sheet: "${sheetName}"`);
+
+    // Get configuration from config sheet
+    Logger.log('Loading configuration from config sheet...');
+    const config = getSheetConfig(sheetName);
+    Logger.log('SUCCESS: Configuration loaded');
+
     // Parse folder URLs into context object
     Logger.log('Parsing parent folder URLs...');
     const context = {
-      workspacesRootId: parseFolderId(PARENT_FOLDERS.WORKSPACES_ROOT),
-      versionsRootId: parseFolderId(PARENT_FOLDERS.VERSIONS_ROOT),
-      publishedRootId: parseFolderId(PARENT_FOLDERS.PUBLISHED_ROOT)
+      workspacesRootId: parseFolderId(config.workspace_root),
+      versionsRootId: parseFolderId(config.versions_root),
+      publishedRootId: parseFolderId(config.published_root)
     };
     Logger.log('SUCCESS: All parent folder URLs parsed');
-
-    const sheet = SpreadsheetApp.getActiveSheet();
 
     // Step 1: Validate sheet structure
     ss.toast('Validating sheet structure...', '🔍 Step 1/4', 3);
@@ -403,6 +402,62 @@ function validateActiveSheetStructure() {
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+/**
+ * Reads configuration from the "config" sheet for the specified sheet name.
+ * Returns an object with workspace_root, versions_root, and published_root URLs.
+ *
+ * @param {string} sheetName - The name of the sheet to look up
+ * @returns {Object} Configuration object containing:
+ *   - workspace_root: URL to the workspace parent folder
+ *   - versions_root: URL to the versions parent folder
+ *   - published_root: URL to the published parent folder
+ * @throws {Error} If the config sheet doesn't exist or the sheet name isn't found
+ */
+function getSheetConfig(sheetName) {
+  Logger.log(`  - Looking up config for sheet: "${sheetName}"`);
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const configSheet = ss.getSheetByName('config');
+
+  if (!configSheet) {
+    throw new Error('Config sheet not found. Please create a sheet named "config" with columns: sheet, workspace_root, versions_root, published_root');
+  }
+
+  // Read all data from config sheet
+  const lastRow = configSheet.getLastRow();
+  if (lastRow < 2) {
+    throw new Error('Config sheet is empty. Please add configuration rows.');
+  }
+
+  const data = configSheet.getRange(1, 1, lastRow, configSheet.getLastColumn()).getValues();
+  const headers = data[0].map(h => String(h).toLowerCase().trim());
+
+  // Find column indices
+  const sheetColIndex = headers.indexOf('sheet');
+  const workspaceRootIndex = headers.indexOf('workspace_root');
+  const versionsRootIndex = headers.indexOf('versions_root');
+  const publishedRootIndex = headers.indexOf('published_root');
+
+  if (sheetColIndex === -1 || workspaceRootIndex === -1 || versionsRootIndex === -1 || publishedRootIndex === -1) {
+    throw new Error('Config sheet is missing required columns: sheet, workspace_root, versions_root, published_root');
+  }
+
+  // Find the row matching the sheet name
+  for (let i = 1; i < data.length; i++) {
+    const rowSheetName = String(data[i][sheetColIndex]).trim();
+    if (rowSheetName === sheetName) {
+      Logger.log(`  - SUCCESS: Found config for sheet "${sheetName}"`);
+      return {
+        workspace_root: String(data[i][workspaceRootIndex]).trim(),
+        versions_root: String(data[i][versionsRootIndex]).trim(),
+        published_root: String(data[i][publishedRootIndex]).trim()
+      };
+    }
+  }
+
+  throw new Error(`No configuration found for sheet "${sheetName}" in the config sheet`);
+}
 
 /**
  * Parses a Google Drive folder URL and extracts the folder ID.
