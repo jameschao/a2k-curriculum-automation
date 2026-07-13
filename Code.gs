@@ -6,7 +6,7 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   
   // Instantiates the top-level main menu container
-  ui.createMenu('⚙️ Master Control')
+  ui.createMenu('⚙️ Master Control 1')
     .addItem('Run Full Automation Sync', 'triggerAutomationSync') // (Display Label, Target Function Name)
     .addItem('Verify Folder Status', 'checkFolderStatus')
     
