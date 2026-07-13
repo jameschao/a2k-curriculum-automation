@@ -4,15 +4,16 @@
 // To find a folder ID: Open the folder in Drive, copy the ID from the URL
 // URL format: https://drive.google.com/drive/folders/{FOLDER_ID_HERE}
 
+// TODO: change these to be dynamic based on the grade level or series
 const PARENT_FOLDERS = {
   // Parent folder containing all lesson workspace folders
-  WORKSPACE: '1UetXJ8BXSvkjadKsve0pLGCVkipN52b8',
+  WORKSPACES_ROOT: '1UetXJ8BXSvkjadKsve0pLGCVkipN52b8',
 
   // Parent folder containing all lesson version folders
-  VERSIONS:  '1acCgaNU88gnyp4sqd-Cr9duLUjkipfgT',
+  VERSIONS_ROOT: '1acCgaNU88gnyp4sqd-Cr9duLUjkipfgT',
 
   // Parent folder containing all lesson published folders
-  PUBLISHED: '1cEzXD5bo0nkbUfZNeoENQQruPqJsdp_a'
+  PUBLISHED_ROOT: '1cEzXD5bo0nkbUfZNeoENQQruPqJsdp_a'
 };
 
 // ============================================================================
@@ -451,8 +452,8 @@ function getValidatedLessonName() {
  *   - workspaceFolderId: ID of the source workspace folder
  */
 function createVersionFolder(lessonId) {
-  Logger.log(`  - Getting versions parent folder (ID: ${PARENT_FOLDERS.VERSIONS})...`);
-  const versionsParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.VERSIONS);
+  Logger.log(`  - Getting versions parent folder (ID: ${PARENT_FOLDERS.VERSIONS_ROOT})...`);
+  const versionsParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.VERSIONS_ROOT);
   Logger.log(`  - SUCCESS: Found versions parent folder: "${versionsParentFolder.getName()}"`);
 
   // Get or create the lesson's versions folder
@@ -469,8 +470,8 @@ function createVersionFolder(lessonId) {
   Logger.log(`  - SUCCESS: Version folder created`);
 
   // Get the lesson's workspace folder
-  Logger.log(`  - Getting workspace parent folder (ID: ${PARENT_FOLDERS.WORKSPACE})...`);
-  const workspaceParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.WORKSPACE);
+  Logger.log(`  - Getting workspace parent folder (ID: ${PARENT_FOLDERS.WORKSPACES_ROOT})...`);
+  const workspaceParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.WORKSPACES_ROOT);
   Logger.log(`  - Finding workspace folder for lesson: "${lessonId}"...`);
 
   const workspaceFolders = workspaceParentFolder.getFoldersByName(lessonId);
@@ -544,8 +545,8 @@ function publishVersionFiles(lessonId, versionFolderId) {
   const versionFolder = DriveApp.getFolderById(versionFolderId);
   Logger.log(`  - SUCCESS: Found version folder`);
 
-  Logger.log(`  - Getting published parent folder (ID: ${PARENT_FOLDERS.PUBLISHED})...`);
-  const publishedParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.PUBLISHED);
+  Logger.log(`  - Getting published parent folder (ID: ${PARENT_FOLDERS.PUBLISHED_ROOT})...`);
+  const publishedParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.PUBLISHED_ROOT);
   Logger.log(`  - SUCCESS: Found published parent folder: "${publishedParentFolder.getName()}"`);
 
   // Get or create the lesson's published folder
