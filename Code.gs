@@ -16,6 +16,33 @@ const PARENT_FOLDERS = {
 };
 
 // ============================================================================
+// CONFIGURATION - Column Headers
+// ============================================================================
+
+const COLUMNS = {
+  ID: 'id',
+  STATUS: 'status',
+  WORKSPACE_FOLDER_URL: 'workspace_folder_url',
+  LATEST_VERSION_FOLDER_URL: 'latest_version_folder_url',
+  PUBLISH_FOLDER_URL: 'publish_folder_url',
+  LAST_PUBLISH_TIME: 'last_publish_time'
+};
+
+// ============================================================================
+// CONFIGURATION - Status Values
+// ============================================================================
+
+const STATUS_VALUES = {
+  NOT_STARTED: 'Not Started',
+  IN_DEVELOPMENT: 'In Development',
+  IN_REVIEW: 'In Review',
+  READY_TO_PUBLISH: 'Ready to Publish',
+  PUBLISHING_IN_PROGRESS: 'Publishing in Progress',
+  PUBLISHED: 'Published',
+  BLOCKED: 'Blocked'
+};
+
+// ============================================================================
 // MENU INITIALIZATION
 // ============================================================================
 
@@ -25,22 +52,27 @@ const PARENT_FOLDERS = {
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  
+
   // Instantiates the top-level main menu container
   ui.createMenu('🚀 A2K Publish')
     .addItem('Publish lesson', 'publishLesson') // (Display Label, Target Function Name)
     .addItem('Verify Folder Status', 'checkFolderStatus')
-    
+
     // Adds a visual dividing line to group operational commands
-    .addSeparator() 
-    
+    .addSeparator()
+
+    // Nests a sub-menu for validation
+    .addSubMenu(ui.createMenu('Validation')
+      .addItem('Validate Active Sheet', 'validateActiveSheetStructure')
+    )
+
     // Nests a sub-menu for secondary/administrative overrides
     .addSubMenu(ui.createMenu('Advanced Utilities')
       .addItem('Force Google Site Re-Publish', 'syncGoogleSiteOnly')
     )
-    
+
     // Renders the built structure into the spreadsheet main header bar
-    .addToUi(); 
+    .addToUi();
 }
 
 // ============================================================================
@@ -131,6 +163,152 @@ function syncGoogleSiteOnly() {
   SpreadsheetApp.getUi().alert('Success: Pushing direct updates to Google Sites REST API.');
 }
 
+/**
+ * Validates the active sheet for correct structure column headers and status values
+ */
+function validateSheetStructure(sheet) {
+  const ui = SpreadsheetApp.getUi();
+  Logger.log('=== Starting validateSheetStructure ===');
+
+  try {
+    const validationResults = {
+      isValid: true,
+      missingColumns: [],
+      additionalColumns: [],
+      missingStatusValues: [],
+      unexpectedStatusValues: []
+    };
+
+    // Step 1: Validate column headers
+    Logger.log('Step 1: Validating column headers...');
+    const columnIndices = getColumnIndices(sheet);
+    const expectedColumns = Object.values(COLUMNS);
+    const actualColumns = Object.keys(columnIndices);
+
+    // Check for missing columns (FAIL validation)
+    expectedColumns.forEach(expectedCol => {
+      if (!columnIndices[expectedCol]) {
+        validationResults.missingColumns.push(expectedCol);
+        validationResults.isValid = false;
+      }
+    });
+
+    // Check for additional columns (acceptable, just informational)
+    actualColumns.forEach(actualCol => {
+      if (!expectedColumns.includes(actualCol)) {
+        validationResults.additionalColumns.push(actualCol);
+      }
+    });
+
+    Logger.log(`  - Missing columns: ${validationResults.missingColumns.length}`);
+    Logger.log(`  - Additional columns: ${validationResults.additionalColumns.length}`);
+
+    // Step 2: Validate status column dropdown values
+    Logger.log('Step 2: Validating status column dropdown values...');
+    const statusColumnIndex = columnIndices[COLUMNS.STATUS];
+
+    if (statusColumnIndex) {
+      const expectedStatusValues = Object.values(STATUS_VALUES);
+      const actualStatusValues = getDropdownValues(sheet, statusColumnIndex);
+
+      if (actualStatusValues) {
+        // Check for missing status values
+        expectedStatusValues.forEach(expectedStatus => {
+          if (!actualStatusValues.includes(expectedStatus)) {
+            validationResults.missingStatusValues.push(expectedStatus);
+            validationResults.isValid = false;
+          }
+        });
+
+        // Check for unexpected status values
+        actualStatusValues.forEach(actualStatus => {
+          if (!expectedStatusValues.includes(actualStatus)) {
+            validationResults.unexpectedStatusValues.push(actualStatus);
+            validationResults.isValid = false;
+          }
+        });
+
+        Logger.log(`  - Missing status values: ${validationResults.missingStatusValues.length}`);
+        Logger.log(`  - Unexpected status values: ${validationResults.unexpectedStatusValues.length}`);
+      } else {
+        Logger.log('  - WARNING: No data validation found on status column');
+        validationResults.isValid = false;
+        validationResults.missingStatusValues = expectedStatusValues;
+      }
+    } else {
+      Logger.log('  - WARNING: Status column not found, skipping status validation');
+    }
+
+    // Step 3: Build and display results
+    Logger.log('Step 3: Building validation report...');
+    let message = '';
+
+    if (validationResults.isValid) {
+      message = '✅ Validation Passed\n\nAll required column headers and status values are correct.';
+
+      // Mention additional columns if present
+      if (validationResults.additionalColumns.length > 0) {
+        message += '\n\nAdditional columns found (acceptable):\n  • ' +
+                   validationResults.additionalColumns.join('\n  • ');
+      }
+
+      Logger.log('SUCCESS: Validation passed');
+    } else {
+      message = '❌ Validation Failed\n\n';
+      const issues = [];
+
+      if (validationResults.missingColumns.length > 0) {
+        issues.push('Missing Columns:\n  • ' + validationResults.missingColumns.join('\n  • '));
+      }
+
+      if (validationResults.missingStatusValues.length > 0) {
+        issues.push('Missing Status Values:\n  • ' + validationResults.missingStatusValues.join('\n  • '));
+      }
+
+      if (validationResults.unexpectedStatusValues.length > 0) {
+        issues.push('Unexpected Status Values:\n  • ' + validationResults.unexpectedStatusValues.join('\n  • '));
+      }
+
+      message += issues.join('\n\n');
+
+      // Mention additional columns if present (at the end, as informational)
+      if (validationResults.additionalColumns.length > 0) {
+        message += '\n\nAdditional columns found (acceptable):\n  • ' +
+                   validationResults.additionalColumns.join('\n  • ');
+      }
+
+      Logger.log('FAILED: Validation issues found');
+    }
+
+    Logger.log('=== Validation completed ===');
+
+    ui.alert(
+      validationResults.isValid ? 'Validation Passed' : 'Validation Failed',
+      message,
+      ui.ButtonSet.OK
+    );
+
+  } catch (error) {
+    Logger.log(`FATAL ERROR in validateSheetStructure: ${error.message}`);
+    Logger.log(`Stack trace: ${error.stack}`);
+    ui.alert(
+      'Error',
+      `Validation failed with error: ${error.message}`,
+      ui.ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * Validates the structure of the currently active sheet in the spreadsheet.
+ * This function is intended to be called from the custom menu.
+ */
+function validateActiveSheetStructure() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  validateSheetStructure(sheet);
+}
+
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -160,7 +338,7 @@ function getValidatedLessonName() {
 
   // Get column indices to find the "id" column
   const columnIndices = getColumnIndices(sheet);
-  const idColumnIndex = columnIndices['id'];
+  const idColumnIndex = columnIndices[COLUMNS.ID];
 
   if (!idColumnIndex) {
     Logger.log('  - FAILED: "id" column not found in sheet');
@@ -366,6 +544,40 @@ function getColumnIndices(sheet) {
 }
 
 /**
+ * Gets the dropdown values from a data validation rule in a column
+ * @param {Sheet} sheet - The sheet to read from
+ * @param {number} columnIndex - The 1-indexed column number
+ * @returns {Array<string>|null} Array of dropdown values, or null if no data validation
+ */
+function getDropdownValues(sheet, columnIndex) {
+  // Get data validation from the first data row (row 2)
+  const range = sheet.getRange(2, columnIndex);
+  const validation = range.getDataValidation();
+
+  if (!validation) {
+    Logger.log(`  - No data validation found in column ${columnIndex}`);
+    return null;
+  }
+
+  const criteria = validation.getCriteriaType();
+
+  // Check if it's a list validation (dropdown)
+  if (criteria === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+    const values = validation.getCriteriaValues()[0];
+    Logger.log(`  - Found dropdown values: ${values}`);
+    return values;
+  } else if (criteria === SpreadsheetApp.DataValidationCriteria.VALUE_IN_RANGE) {
+    // If dropdown is based on a range, get values from that range
+    const sourceRange = validation.getCriteriaValues()[0];
+    const values = sourceRange.getValues().flat().filter(v => v !== '');
+    Logger.log(`  - Found dropdown values from range: ${values}`);
+    return values;
+  }
+
+  return null;
+}
+
+/**
  * Finds the row index for a lesson by its id
  * @param {Sheet} sheet - The sheet to search in
  * @param {Object} columnIndices - Map of column names to indices
@@ -373,7 +585,7 @@ function getColumnIndices(sheet) {
  * @returns {number} The 1-indexed row number, or -1 if not found
  */
 function findLessonRow(sheet, columnIndices, lessonId) {
-  const idColumnIndex = columnIndices['id'];
+  const idColumnIndex = columnIndices[COLUMNS.ID];
   if (!idColumnIndex) {
     Logger.log('  - WARNING: "id" column not found in sheet');
     return -1;
@@ -428,26 +640,26 @@ function updateSpreadsheetRow(rowInfo, columnIndices, workspaceFolderId, version
   Logger.log('  - Creating hyperlinked formulas...');
 
   // Update the cells with hyperlinked formulas
-  if (columnIndices['workspace_folder_url']) {
+  if (columnIndices[COLUMNS.WORKSPACE_FOLDER_URL]) {
     const workspaceFormula = `=HYPERLINK("${workspaceUrl}", "folder")`;
-    sheet.getRange(targetRow, columnIndices['workspace_folder_url']).setFormula(workspaceFormula);
+    sheet.getRange(targetRow, columnIndices[COLUMNS.WORKSPACE_FOLDER_URL]).setFormula(workspaceFormula);
     Logger.log(`    - Set workspace_folder_url`);
   }
 
-  if (columnIndices['latest_version_folder_url']) {
+  if (columnIndices[COLUMNS.LATEST_VERSION_FOLDER_URL]) {
     const versionFormula = `=HYPERLINK("${versionUrl}", "${versionTimestamp}")`;
-    sheet.getRange(targetRow, columnIndices['latest_version_folder_url']).setFormula(versionFormula);
+    sheet.getRange(targetRow, columnIndices[COLUMNS.LATEST_VERSION_FOLDER_URL]).setFormula(versionFormula);
     Logger.log(`    - Set latest_version_folder_url with timestamp: ${versionTimestamp}`);
   }
 
-  if (columnIndices['publish_folder_url']) {
+  if (columnIndices[COLUMNS.PUBLISH_FOLDER_URL]) {
     const publishFormula = `=HYPERLINK("${publishUrl}", "folder")`;
-    sheet.getRange(targetRow, columnIndices['publish_folder_url']).setFormula(publishFormula);
+    sheet.getRange(targetRow, columnIndices[COLUMNS.PUBLISH_FOLDER_URL]).setFormula(publishFormula);
     Logger.log(`    - Set publish_folder_url`);
   }
 
-  if (columnIndices['last_publish_time']) {
-    sheet.getRange(targetRow, columnIndices['last_publish_time']).setValue(publishTime);
+  if (columnIndices[COLUMNS.LAST_PUBLISH_TIME]) {
+    sheet.getRange(targetRow, columnIndices[COLUMNS.LAST_PUBLISH_TIME]).setValue(publishTime);
     Logger.log(`    - Set last_publish_time: ${publishTime}`);
   }
 
