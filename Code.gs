@@ -270,6 +270,21 @@ function publishVersionFiles(lessonName, versionFolderId) {
   const publishFolder = getOrCreateFolder(publishedParentFolder, lessonName);
   Logger.log(`  - SUCCESS: Publish folder ready`);
 
+  // Delete all existing files in the publish folder
+  Logger.log(`  - Deleting existing files in publish folder...`);
+  const existingFiles = publishFolder.getFiles();
+  let deletedCount = 0;
+
+  while (existingFiles.hasNext()) {
+    const file = existingFiles.next();
+    const fileName = file.getName();
+    Logger.log(`    - Deleting: "${fileName}"`);
+    file.setTrashed(true);
+    deletedCount++;
+  }
+
+  Logger.log(`  - SUCCESS: Deleted ${deletedCount} existing files`);
+
   // Copy all files from version folder to publish folder
   Logger.log(`  - Copying files to publish folder...`);
   const files = versionFolder.getFiles();
