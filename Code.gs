@@ -92,9 +92,32 @@ function publishLesson() {
   Logger.log('=== Starting publishLesson ===');
 
   try {
-    // Step 1: Get and validate the selected lesson name
-    ss.toast('Validating lesson selection...', '📋 Step 1/5', 3);
-    Logger.log('Step 1: Validating lesson name selection...');
+    const sheet = SpreadsheetApp.getActiveSheet();
+
+    // Step 1: Validate sheet structure
+    ss.toast('Validating sheet structure...', '🔍 Step 1/4', 3);
+    Logger.log('Step 1: Validating sheet structure...');
+    const structureValidation = performSheetValidation(sheet);
+
+    if (!structureValidation.isValid) {
+      Logger.log('FAILED: Sheet structure validation failed');
+      const message = formatValidationMessage(structureValidation);
+      ui.alert(
+        'Sheet Structure Validation Failed',
+        'The sheet structure is invalid. Please fix the following issues before publishing:\n\n' + message,
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+
+    Logger.log('SUCCESS: Sheet structure is valid');
+
+    // Step 2: Validate lesson (ID and status)
+    ss.toast('Validating lesson...', '📋 Step 2/4', 3);
+    Logger.log('Step 2: Validating lesson ID and status...');
+
+    // Get and validate the selected lesson name
+    Logger.log('  - Validating lesson ID selection...');
     const lessonId = getValidatedLessonName();
 
     if (!lessonId) {
@@ -107,17 +130,15 @@ function publishLesson() {
       return;
     }
 
-    Logger.log(`SUCCESS: Validated lesson name: "${lessonId}"`);
+    Logger.log(`  - SUCCESS: Validated lesson ID: "${lessonId}"`);
 
-    // Step 2: Validate lesson status
-    ss.toast('Validating lesson status...', '✅ Step 2/5', 3);
-    Logger.log('Step 2: Validating lesson status...');
-    const sheet = SpreadsheetApp.getActiveSheet();
+    // Validate lesson status
+    Logger.log('  - Validating lesson status...');
     const columnIndices = getColumnIndices(sheet);
     const lessonRow = findLessonRow(sheet, columnIndices, lessonId);
 
     if (lessonRow === -1) {
-      Logger.log('FAILED: Could not find lesson row');
+      Logger.log('  - FAILED: Could not find lesson row');
       ui.alert(
         'Error',
         `Could not find lesson "${lessonId}" in the sheet.`,
@@ -128,7 +149,7 @@ function publishLesson() {
 
     const statusColumnIndex = columnIndices[COLUMNS.STATUS];
     if (!statusColumnIndex) {
-      Logger.log('FAILED: Status column not found');
+      Logger.log('  - FAILED: Status column not found');
       ui.alert(
         'Error',
         'Status column not found in the sheet.',
@@ -141,7 +162,7 @@ function publishLesson() {
     Logger.log(`  - Current status: "${currentStatus}"`);
 
     if (currentStatus !== STATUS_VALUES.READY_TO_PUBLISH) {
-      Logger.log(`FAILED: Lesson status is "${currentStatus}", not "Ready to Publish"`);
+      Logger.log(`  - FAILED: Lesson status is "${currentStatus}", not "Ready to Publish"`);
       ui.alert(
         'Cannot Publish',
         `Lesson "${lessonId}" has status "${currentStatus}".\n\n` +
@@ -151,23 +172,23 @@ function publishLesson() {
       return;
     }
 
-    Logger.log('SUCCESS: Lesson status is "Ready to Publish"');
+    Logger.log('  - SUCCESS: Lesson status is "Ready to Publish"');
+    Logger.log('SUCCESS: Lesson validation complete');
 
     // Step 3: Create timestamped version folder with PDFs
-    ss.toast('Creating version folder and generating PDFs...', '📁 Step 3/5', 5);
+    ss.toast('Creating version folder and generating PDFs...', '📁 Step 3/4', 5);
     Logger.log('Step 3: Creating version folder and generating PDFs...');
     const {versionFolderId, workspaceFolderId} = createVersionFolder(lessonId);
     Logger.log(`SUCCESS: Version folder created with ID: ${versionFolderId}`);
 
-    // Step 4: Copy all files to publish folder
-    ss.toast('Publishing files to publish folder...', '🚀 Step 4/5', 5);
+    // Step 4: Publish files to publish folder
+    ss.toast('Publishing files to publish folder...', '🚀 Step 4/4', 5);
     Logger.log('Step 4: Publishing files to publish folder...');
     const publishFolderId = publishVersionFiles(lessonId, versionFolderId);
     Logger.log('SUCCESS: Files published successfully');
 
-    // Step 5: Update spreadsheet with folder URLs, timestamp, and status
-    ss.toast('Updating spreadsheet row...', '📝 Step 5/5', 3);
-    Logger.log('Step 5: Updating spreadsheet row...');
+    // Update spreadsheet row with folder URLs, timestamp, and status
+    Logger.log('Updating spreadsheet row...');
     updateSpreadsheetRow({row: lessonRow, lessonId: lessonId}, columnIndices, workspaceFolderId, versionFolderId, publishFolderId);
     Logger.log('SUCCESS: Spreadsheet row updated');
 
@@ -200,123 +221,139 @@ function syncGoogleSiteOnly() {
 }
 
 /**
+ * Validates the sheet structure and returns validation results
+ * @param {Sheet} sheet - The sheet to validate
+ * @returns {Object} Validation results with isValid flag and details
+ */
+function performSheetValidation(sheet) {
+  Logger.log('=== Starting performSheetValidation ===');
+
+  const validationResults = {
+    isValid: true,
+    missingColumns: [],
+    additionalColumns: [],
+    missingStatusValues: [],
+    unexpectedStatusValues: []
+  };
+
+  // Step 1: Validate column headers
+  Logger.log('Step 1: Validating column headers...');
+  const columnIndices = getColumnIndices(sheet);
+  const expectedColumns = Object.values(COLUMNS);
+  const actualColumns = Object.keys(columnIndices);
+
+  // Check for missing columns (FAIL validation)
+  expectedColumns.forEach(expectedCol => {
+    if (!columnIndices[expectedCol]) {
+      validationResults.missingColumns.push(expectedCol);
+      validationResults.isValid = false;
+    }
+  });
+
+  // Check for additional columns (acceptable, just informational)
+  actualColumns.forEach(actualCol => {
+    if (!expectedColumns.includes(actualCol)) {
+      validationResults.additionalColumns.push(actualCol);
+    }
+  });
+
+  Logger.log(`  - Missing columns: ${validationResults.missingColumns.length}`);
+  Logger.log(`  - Additional columns: ${validationResults.additionalColumns.length}`);
+
+  // Step 2: Validate status column dropdown values
+  Logger.log('Step 2: Validating status column dropdown values...');
+  const statusColumnIndex = columnIndices[COLUMNS.STATUS];
+
+  if (statusColumnIndex) {
+    const expectedStatusValues = Object.values(STATUS_VALUES);
+    const actualStatusValues = getDropdownValues(sheet, statusColumnIndex);
+
+    if (actualStatusValues) {
+      // Check for missing status values
+      expectedStatusValues.forEach(expectedStatus => {
+        if (!actualStatusValues.includes(expectedStatus)) {
+          validationResults.missingStatusValues.push(expectedStatus);
+          validationResults.isValid = false;
+        }
+      });
+
+      // Check for unexpected status values
+      actualStatusValues.forEach(actualStatus => {
+        if (!expectedStatusValues.includes(actualStatus)) {
+          validationResults.unexpectedStatusValues.push(actualStatus);
+          validationResults.isValid = false;
+        }
+      });
+
+      Logger.log(`  - Missing status values: ${validationResults.missingStatusValues.length}`);
+      Logger.log(`  - Unexpected status values: ${validationResults.unexpectedStatusValues.length}`);
+    } else {
+      Logger.log('  - WARNING: No data validation found on status column');
+      validationResults.isValid = false;
+      validationResults.missingStatusValues = expectedStatusValues;
+    }
+  } else {
+    Logger.log('  - WARNING: Status column not found, skipping status validation');
+  }
+
+  Logger.log(`=== Validation completed: ${validationResults.isValid ? 'PASSED' : 'FAILED'} ===`);
+  return validationResults;
+}
+
+/**
+ * Formats validation results into a user-friendly message
+ * @param {Object} validationResults - The validation results object
+ * @returns {string} Formatted message
+ */
+function formatValidationMessage(validationResults) {
+  let message = '';
+
+  if (validationResults.isValid) {
+    message = '✅ Validation Passed\n\nAll required column headers and status values are correct.';
+
+    // Mention additional columns if present
+    if (validationResults.additionalColumns.length > 0) {
+      message += '\n\nAdditional columns found (acceptable):\n  • ' +
+                 validationResults.additionalColumns.join('\n  • ');
+    }
+  } else {
+    message = '❌ Validation Failed\n\n';
+    const issues = [];
+
+    if (validationResults.missingColumns.length > 0) {
+      issues.push('Missing Columns:\n  • ' + validationResults.missingColumns.join('\n  • '));
+    }
+
+    if (validationResults.missingStatusValues.length > 0) {
+      issues.push('Missing Status Values:\n  • ' + validationResults.missingStatusValues.join('\n  • '));
+    }
+
+    if (validationResults.unexpectedStatusValues.length > 0) {
+      issues.push('Unexpected Status Values:\n  • ' + validationResults.unexpectedStatusValues.join('\n  • '));
+    }
+
+    message += issues.join('\n\n');
+
+    // Mention additional columns if present (at the end, as informational)
+    if (validationResults.additionalColumns.length > 0) {
+      message += '\n\nAdditional columns found (acceptable):\n  • ' +
+                 validationResults.additionalColumns.join('\n  • ');
+    }
+  }
+
+  return message;
+}
+
+/**
  * Validates the active sheet for correct structure column headers and status values
+ * Shows UI alert with results
  */
 function validateSheetStructure(sheet) {
   const ui = SpreadsheetApp.getUi();
-  Logger.log('=== Starting validateSheetStructure ===');
 
   try {
-    const validationResults = {
-      isValid: true,
-      missingColumns: [],
-      additionalColumns: [],
-      missingStatusValues: [],
-      unexpectedStatusValues: []
-    };
-
-    // Step 1: Validate column headers
-    Logger.log('Step 1: Validating column headers...');
-    const columnIndices = getColumnIndices(sheet);
-    const expectedColumns = Object.values(COLUMNS);
-    const actualColumns = Object.keys(columnIndices);
-
-    // Check for missing columns (FAIL validation)
-    expectedColumns.forEach(expectedCol => {
-      if (!columnIndices[expectedCol]) {
-        validationResults.missingColumns.push(expectedCol);
-        validationResults.isValid = false;
-      }
-    });
-
-    // Check for additional columns (acceptable, just informational)
-    actualColumns.forEach(actualCol => {
-      if (!expectedColumns.includes(actualCol)) {
-        validationResults.additionalColumns.push(actualCol);
-      }
-    });
-
-    Logger.log(`  - Missing columns: ${validationResults.missingColumns.length}`);
-    Logger.log(`  - Additional columns: ${validationResults.additionalColumns.length}`);
-
-    // Step 2: Validate status column dropdown values
-    Logger.log('Step 2: Validating status column dropdown values...');
-    const statusColumnIndex = columnIndices[COLUMNS.STATUS];
-
-    if (statusColumnIndex) {
-      const expectedStatusValues = Object.values(STATUS_VALUES);
-      const actualStatusValues = getDropdownValues(sheet, statusColumnIndex);
-
-      if (actualStatusValues) {
-        // Check for missing status values
-        expectedStatusValues.forEach(expectedStatus => {
-          if (!actualStatusValues.includes(expectedStatus)) {
-            validationResults.missingStatusValues.push(expectedStatus);
-            validationResults.isValid = false;
-          }
-        });
-
-        // Check for unexpected status values
-        actualStatusValues.forEach(actualStatus => {
-          if (!expectedStatusValues.includes(actualStatus)) {
-            validationResults.unexpectedStatusValues.push(actualStatus);
-            validationResults.isValid = false;
-          }
-        });
-
-        Logger.log(`  - Missing status values: ${validationResults.missingStatusValues.length}`);
-        Logger.log(`  - Unexpected status values: ${validationResults.unexpectedStatusValues.length}`);
-      } else {
-        Logger.log('  - WARNING: No data validation found on status column');
-        validationResults.isValid = false;
-        validationResults.missingStatusValues = expectedStatusValues;
-      }
-    } else {
-      Logger.log('  - WARNING: Status column not found, skipping status validation');
-    }
-
-    // Step 3: Build and display results
-    Logger.log('Step 3: Building validation report...');
-    let message = '';
-
-    if (validationResults.isValid) {
-      message = '✅ Validation Passed\n\nAll required column headers and status values are correct.';
-
-      // Mention additional columns if present
-      if (validationResults.additionalColumns.length > 0) {
-        message += '\n\nAdditional columns found (acceptable):\n  • ' +
-                   validationResults.additionalColumns.join('\n  • ');
-      }
-
-      Logger.log('SUCCESS: Validation passed');
-    } else {
-      message = '❌ Validation Failed\n\n';
-      const issues = [];
-
-      if (validationResults.missingColumns.length > 0) {
-        issues.push('Missing Columns:\n  • ' + validationResults.missingColumns.join('\n  • '));
-      }
-
-      if (validationResults.missingStatusValues.length > 0) {
-        issues.push('Missing Status Values:\n  • ' + validationResults.missingStatusValues.join('\n  • '));
-      }
-
-      if (validationResults.unexpectedStatusValues.length > 0) {
-        issues.push('Unexpected Status Values:\n  • ' + validationResults.unexpectedStatusValues.join('\n  • '));
-      }
-
-      message += issues.join('\n\n');
-
-      // Mention additional columns if present (at the end, as informational)
-      if (validationResults.additionalColumns.length > 0) {
-        message += '\n\nAdditional columns found (acceptable):\n  • ' +
-                   validationResults.additionalColumns.join('\n  • ');
-      }
-
-      Logger.log('FAILED: Validation issues found');
-    }
-
-    Logger.log('=== Validation completed ===');
+    const validationResults = performSheetValidation(sheet);
+    const message = formatValidationMessage(validationResults);
 
     ui.alert(
       validationResults.isValid ? 'Validation Passed' : 'Validation Failed',
