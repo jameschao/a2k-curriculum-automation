@@ -56,6 +56,7 @@ function onOpen() {
     // Nests a sub-menu for validation
     .addSubMenu(ui.createMenu('Validation')
       .addItem('Validate Active Sheet', 'validateActiveSheetStructure')
+      .addItem('Validate Config Sheet', 'validateConfigSheetStructure')
     )
 
     // Renders the built structure into the spreadsheet main header bar
@@ -89,27 +90,47 @@ function publishLesson() {
     const sheetName = sheet.getName();
     Logger.log(`Active sheet: "${sheetName}"`);
 
+    // Step 1: Validate config sheet and active sheet structure
+    ss.toast('Validating configuration and sheet structure...', '🔍 Step 1/4', 3);
+    Logger.log('Step 1: Validating configuration and sheet structure...');
+
+    // Step 1a: Validate config sheet
+    Logger.log('  1a: Validating config sheet...');
+    const configValidation = performConfigSheetValidation();
+
+    if (!configValidation.isValid) {
+      Logger.log('  FAILED: Config sheet validation failed');
+      const message = formatConfigValidationMessage(configValidation);
+      ui.alert(
+        'Config Sheet Validation Failed',
+        'The config sheet is invalid. Please fix the following issues before publishing:\n\n' + message,
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+
+    Logger.log('  SUCCESS: Config sheet is valid');
+
     // Get configuration from config sheet
-    Logger.log('Loading configuration from config sheet...');
+    Logger.log('  Loading configuration from config sheet...');
     const config = getSheetConfig(sheetName);
-    Logger.log('SUCCESS: Configuration loaded');
+    Logger.log('  SUCCESS: Configuration loaded');
 
     // Parse folder URLs into context object
-    Logger.log('Parsing parent folder URLs...');
+    Logger.log('  Parsing parent folder URLs...');
     const context = {
       workspacesRootId: parseFolderId(config.workspace_root),
       versionsRootId: parseFolderId(config.versions_root),
       publishedRootId: parseFolderId(config.published_root)
     };
-    Logger.log('SUCCESS: All parent folder URLs parsed');
+    Logger.log('  SUCCESS: All parent folder URLs parsed');
 
-    // Step 1: Validate sheet structure
-    ss.toast('Validating sheet structure...', '🔍 Step 1/4', 3);
-    Logger.log('Step 1: Validating sheet structure...');
+    // Step 1b: Validate active sheet structure
+    Logger.log('  1b: Validating active sheet structure...');
     const structureValidation = performSheetValidation(sheet);
 
     if (!structureValidation.isValid) {
-      Logger.log('FAILED: Sheet structure validation failed');
+      Logger.log('  FAILED: Sheet structure validation failed');
       const message = formatValidationMessage(structureValidation);
       ui.alert(
         'Sheet Structure Validation Failed',
@@ -119,7 +140,8 @@ function publishLesson() {
       return;
     }
 
-    Logger.log('SUCCESS: Sheet structure is valid');
+    Logger.log('  SUCCESS: Sheet structure is valid');
+    Logger.log('SUCCESS: All validation checks passed');
 
     // Step 2: Validate lesson (ID and status)
     ss.toast('Validating lesson...', '📋 Step 2/4', 3);
@@ -396,6 +418,261 @@ function validateSheetStructure(sheet) {
 function validateActiveSheetStructure() {
   const sheet = SpreadsheetApp.getActiveSheet();
   validateSheetStructure(sheet);
+}
+
+/**
+ * Validates the config sheet structure and returns validation results.
+ * Checks for:
+ * - Config sheet exists
+ * - Required column headers are present
+ * - Active sheet has a configuration row
+ * - All folder URL values are present and valid Google Drive URLs
+ *
+ * @returns {Object} Validation results object containing:
+ *   - isValid: boolean indicating if validation passed
+ *   - configSheetExists: boolean indicating if config sheet exists
+ *   - missingColumns: array of missing column names
+ *   - additionalColumns: array of extra column names (informational only)
+ *   - activeSheetHasConfig: boolean indicating if active sheet has a config row
+ *   - activeSheetName: name of the active sheet
+ *   - invalidUrls: array of objects describing invalid URLs (column name and value)
+ *   - missingUrls: array of column names with missing/empty URLs
+ */
+function performConfigSheetValidation() {
+  Logger.log('=== Starting performConfigSheetValidation ===');
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const activeSheet = ss.getActiveSheet();
+  const activeSheetName = activeSheet.getName();
+
+  const validationResults = {
+    isValid: true,
+    configSheetExists: false,
+    missingColumns: [],
+    additionalColumns: [],
+    activeSheetHasConfig: false,
+    activeSheetName: activeSheetName,
+    invalidUrls: [],
+    missingUrls: []
+  };
+
+  // Don't validate the config sheet itself
+  if (activeSheetName === 'config') {
+    Logger.log('Active sheet is the config sheet itself - skipping validation');
+    validationResults.isValid = false;
+    validationResults.isConfigSheet = true;
+    return validationResults;
+  }
+
+  // Step 1: Check if config sheet exists
+  Logger.log('Step 1: Checking if config sheet exists...');
+  const configSheet = ss.getSheetByName('config');
+
+  if (!configSheet) {
+    Logger.log('FAILED: Config sheet does not exist');
+    validationResults.isValid = false;
+    validationResults.configSheetExists = false;
+    return validationResults;
+  }
+
+  validationResults.configSheetExists = true;
+  Logger.log('SUCCESS: Config sheet exists');
+
+  // Step 2: Validate column headers
+  Logger.log('Step 2: Validating column headers...');
+  const expectedColumns = ['sheet', 'workspace_root', 'versions_root', 'published_root'];
+  const lastRow = configSheet.getLastRow();
+  const lastCol = configSheet.getLastColumn();
+
+  if (lastRow < 1) {
+    Logger.log('FAILED: Config sheet is empty');
+    validationResults.isValid = false;
+    validationResults.missingColumns = expectedColumns;
+    return validationResults;
+  }
+
+  const headers = configSheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const normalizedHeaders = headers.map(h => String(h).toLowerCase().trim());
+
+  // Check for missing columns
+  expectedColumns.forEach(expectedCol => {
+    if (!normalizedHeaders.includes(expectedCol)) {
+      validationResults.missingColumns.push(expectedCol);
+      validationResults.isValid = false;
+    }
+  });
+
+  // Check for additional columns (informational only)
+  normalizedHeaders.forEach(actualCol => {
+    if (actualCol && !expectedColumns.includes(actualCol)) {
+      validationResults.additionalColumns.push(actualCol);
+    }
+  });
+
+  Logger.log(`  - Missing columns: ${validationResults.missingColumns.length}`);
+  Logger.log(`  - Additional columns: ${validationResults.additionalColumns.length}`);
+
+  // If missing columns, stop here
+  if (validationResults.missingColumns.length > 0) {
+    return validationResults;
+  }
+
+  // Get column indices
+  const sheetColIndex = normalizedHeaders.indexOf('sheet');
+  const workspaceRootIndex = normalizedHeaders.indexOf('workspace_root');
+  const versionsRootIndex = normalizedHeaders.indexOf('versions_root');
+  const publishedRootIndex = normalizedHeaders.indexOf('published_root');
+
+  // Step 3: Check if active sheet has a configuration row
+  Logger.log(`Step 3: Checking if active sheet "${activeSheetName}" has a config row...`);
+
+  if (lastRow < 2) {
+    Logger.log('FAILED: Config sheet has no data rows');
+    validationResults.isValid = false;
+    validationResults.activeSheetHasConfig = false;
+    return validationResults;
+  }
+
+  const data = configSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let configRow = null;
+
+  for (let i = 0; i < data.length; i++) {
+    const rowSheetName = String(data[i][sheetColIndex]).trim();
+    if (rowSheetName === activeSheetName) {
+      configRow = data[i];
+      Logger.log(`SUCCESS: Found config row for sheet "${activeSheetName}"`);
+      validationResults.activeSheetHasConfig = true;
+      break;
+    }
+  }
+
+  if (!configRow) {
+    Logger.log(`FAILED: No config row found for sheet "${activeSheetName}"`);
+    validationResults.isValid = false;
+    validationResults.activeSheetHasConfig = false;
+    return validationResults;
+  }
+
+  // Step 4: Validate that all URL values are present and valid
+  Logger.log('Step 4: Validating folder URL values...');
+
+  const urlColumns = [
+    { name: 'workspace_root', index: workspaceRootIndex, value: configRow[workspaceRootIndex] },
+    { name: 'versions_root', index: versionsRootIndex, value: configRow[versionsRootIndex] },
+    { name: 'published_root', index: publishedRootIndex, value: configRow[publishedRootIndex] }
+  ];
+
+  urlColumns.forEach(col => {
+    const urlValue = String(col.value).trim();
+
+    // Check if URL is missing or empty
+    if (!urlValue) {
+      Logger.log(`  - FAILED: ${col.name} is empty`);
+      validationResults.missingUrls.push(col.name);
+      validationResults.isValid = false;
+      return;
+    }
+
+    // Try to parse the folder ID to validate URL format
+    try {
+      parseFolderId(urlValue);
+      Logger.log(`  - SUCCESS: ${col.name} is a valid URL`);
+    } catch (error) {
+      Logger.log(`  - FAILED: ${col.name} has invalid URL: ${urlValue}`);
+      validationResults.invalidUrls.push({
+        column: col.name,
+        value: urlValue,
+        error: error.message
+      });
+      validationResults.isValid = false;
+    }
+  });
+
+  Logger.log(`=== Config validation completed: ${validationResults.isValid ? 'PASSED' : 'FAILED'} ===`);
+  return validationResults;
+}
+
+/**
+ * Formats config validation results into a user-friendly message.
+ *
+ * @param {Object} validationResults - The validation results from performConfigSheetValidation()
+ * @returns {string} Formatted message with validation status and any issues found
+ */
+function formatConfigValidationMessage(validationResults) {
+  let message = '';
+
+  // Special case: validating the config sheet itself
+  if (validationResults.isConfigSheet) {
+    return 'Cannot validate the config sheet itself.\n\nPlease switch to a lesson sheet to validate its configuration.';
+  }
+
+  if (validationResults.isValid) {
+    message = `✅ Config Validation Passed\n\nSheet "${validationResults.activeSheetName}" has valid configuration.`;
+
+    if (validationResults.additionalColumns.length > 0) {
+      message += '\n\nAdditional columns in config sheet (acceptable):\n  • ' +
+                 validationResults.additionalColumns.join('\n  • ');
+    }
+  } else {
+    message = '❌ Config Validation Failed\n\n';
+    const issues = [];
+
+    if (!validationResults.configSheetExists) {
+      issues.push('Config sheet not found.\nPlease create a sheet named "config" with columns:\n  • sheet\n  • workspace_root\n  • versions_root\n  • published_root');
+    } else if (validationResults.missingColumns.length > 0) {
+      issues.push('Missing Columns in config sheet:\n  • ' + validationResults.missingColumns.join('\n  • '));
+    } else if (!validationResults.activeSheetHasConfig) {
+      issues.push(`No configuration row found for sheet "${validationResults.activeSheetName}".\n\nPlease add a row in the config sheet with:\n  • sheet = "${validationResults.activeSheetName}"\n  • workspace_root = <folder URL>\n  • versions_root = <folder URL>\n  • published_root = <folder URL>`);
+    } else {
+      if (validationResults.missingUrls.length > 0) {
+        issues.push('Missing or Empty URLs:\n  • ' + validationResults.missingUrls.join('\n  • '));
+      }
+
+      if (validationResults.invalidUrls.length > 0) {
+        const invalidUrlDetails = validationResults.invalidUrls.map(item =>
+          `${item.column}: ${item.value}\n    Error: ${item.error}`
+        );
+        issues.push('Invalid Google Drive URLs:\n  • ' + invalidUrlDetails.join('\n  • '));
+      }
+    }
+
+    message += issues.join('\n\n');
+
+    if (validationResults.additionalColumns.length > 0) {
+      message += '\n\nAdditional columns in config sheet (acceptable):\n  • ' +
+                 validationResults.additionalColumns.join('\n  • ');
+    }
+  }
+
+  return message;
+}
+
+/**
+ * Validates the config sheet and shows a UI alert with the results.
+ * Entry point for the "Validate Config Sheet" menu item.
+ */
+function validateConfigSheetStructure() {
+  const ui = SpreadsheetApp.getUi();
+
+  try {
+    const validationResults = performConfigSheetValidation();
+    const message = formatConfigValidationMessage(validationResults);
+
+    ui.alert(
+      validationResults.isValid ? 'Config Validation Passed' : 'Config Validation Failed',
+      message,
+      ui.ButtonSet.OK
+    );
+
+  } catch (error) {
+    Logger.log(`FATAL ERROR in validateConfigSheetStructure: ${error.message}`);
+    Logger.log(`Stack trace: ${error.stack}`);
+    ui.alert(
+      'Error',
+      `Config validation failed with error: ${error.message}`,
+      ui.ButtonSet.OK
+    );
+  }
 }
 
 
