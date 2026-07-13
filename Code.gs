@@ -175,6 +175,12 @@ function publishLesson() {
     Logger.log('  - SUCCESS: Lesson status is "Ready to Publish"');
     Logger.log('SUCCESS: Lesson validation complete');
 
+    // Update status to "Publishing in Progress"
+    Logger.log('Updating status to "Publishing in Progress"...');
+    sheet.getRange(lessonRow, statusColumnIndex).setValue(STATUS_VALUES.PUBLISHING_IN_PROGRESS);
+    SpreadsheetApp.flush(); // Force the update to be visible immediately
+    Logger.log('SUCCESS: Status updated to "Publishing in Progress"');
+
     // Step 3: Create timestamped version folder with PDFs
     ss.toast('Creating version folder and generating PDFs...', '📁 Step 3/4', 5);
     Logger.log('Step 3: Creating version folder and generating PDFs...');
@@ -741,6 +747,8 @@ function updateSpreadsheetRow(rowInfo, columnIndices, workspaceFolderId, version
     sheet.getRange(targetRow, columnIndices[COLUMNS.STATUS]).setValue(STATUS_VALUES.PUBLISHED);
     Logger.log(`    - Set status: ${STATUS_VALUES.PUBLISHED}`);
   }
+
+  SpreadsheetApp.flush(); // Force the update to be visible immediately
 
   Logger.log('  - SUCCESS: All columns updated');
 }
