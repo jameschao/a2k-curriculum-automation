@@ -93,7 +93,7 @@ function publishLesson() {
 
   try {
     // Step 1: Get and validate the selected lesson name
-    ss.toast('Validating lesson selection...', '📋 Step 1/4', 3);
+    ss.toast('Validating lesson selection...', '📋 Step 1/5', 3);
     Logger.log('Step 1: Validating lesson name selection...');
     const lessonId = getValidatedLessonName();
 
@@ -109,31 +109,67 @@ function publishLesson() {
 
     Logger.log(`SUCCESS: Validated lesson name: "${lessonId}"`);
 
-    // Step 2: Create timestamped version folder with PDFs
-    ss.toast('Creating version folder and generating PDFs...', '📁 Step 2/4', 5);
-    Logger.log('Step 2: Creating version folder and generating PDFs...');
-    const {versionFolderId, workspaceFolderId} = createVersionFolder(lessonId);
-    Logger.log(`SUCCESS: Version folder created with ID: ${versionFolderId}`);
-
-    // Step 3: Copy all files to publish folder
-    ss.toast('Publishing files to publish folder...', '🚀 Step 3/4', 5);
-    Logger.log('Step 3: Publishing files to publish folder...');
-    const publishFolderId = publishVersionFiles(lessonId, versionFolderId);
-    Logger.log('SUCCESS: Files published successfully');
-
-    // Step 4: Update spreadsheet with folder URLs and timestamp
-    ss.toast('Updating spreadsheet row...', '📝 Step 4/4', 3);
-    Logger.log('Step 4: Updating spreadsheet row...');
+    // Step 2: Validate lesson status
+    ss.toast('Validating lesson status...', '✅ Step 2/5', 3);
+    Logger.log('Step 2: Validating lesson status...');
     const sheet = SpreadsheetApp.getActiveSheet();
     const columnIndices = getColumnIndices(sheet);
     const lessonRow = findLessonRow(sheet, columnIndices, lessonId);
 
-    if (lessonRow !== -1) {
-      updateSpreadsheetRow({row: lessonRow, lessonId: lessonId}, columnIndices, workspaceFolderId, versionFolderId, publishFolderId);
-      Logger.log('SUCCESS: Spreadsheet row updated');
-    } else {
-      Logger.log('WARNING: Could not update spreadsheet - lesson row not found');
+    if (lessonRow === -1) {
+      Logger.log('FAILED: Could not find lesson row');
+      ui.alert(
+        'Error',
+        `Could not find lesson "${lessonId}" in the sheet.`,
+        ui.ButtonSet.OK
+      );
+      return;
     }
+
+    const statusColumnIndex = columnIndices[COLUMNS.STATUS];
+    if (!statusColumnIndex) {
+      Logger.log('FAILED: Status column not found');
+      ui.alert(
+        'Error',
+        'Status column not found in the sheet.',
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+
+    const currentStatus = sheet.getRange(lessonRow, statusColumnIndex).getValue();
+    Logger.log(`  - Current status: "${currentStatus}"`);
+
+    if (currentStatus !== STATUS_VALUES.READY_TO_PUBLISH) {
+      Logger.log(`FAILED: Lesson status is "${currentStatus}", not "Ready to Publish"`);
+      ui.alert(
+        'Cannot Publish',
+        `Lesson "${lessonId}" has status "${currentStatus}".\n\n` +
+        `Only lessons with status "${STATUS_VALUES.READY_TO_PUBLISH}" can be published.`,
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+
+    Logger.log('SUCCESS: Lesson status is "Ready to Publish"');
+
+    // Step 3: Create timestamped version folder with PDFs
+    ss.toast('Creating version folder and generating PDFs...', '📁 Step 3/5', 5);
+    Logger.log('Step 3: Creating version folder and generating PDFs...');
+    const {versionFolderId, workspaceFolderId} = createVersionFolder(lessonId);
+    Logger.log(`SUCCESS: Version folder created with ID: ${versionFolderId}`);
+
+    // Step 4: Copy all files to publish folder
+    ss.toast('Publishing files to publish folder...', '🚀 Step 4/5', 5);
+    Logger.log('Step 4: Publishing files to publish folder...');
+    const publishFolderId = publishVersionFiles(lessonId, versionFolderId);
+    Logger.log('SUCCESS: Files published successfully');
+
+    // Step 5: Update spreadsheet with folder URLs, timestamp, and status
+    ss.toast('Updating spreadsheet row...', '📝 Step 5/5', 3);
+    Logger.log('Step 5: Updating spreadsheet row...');
+    updateSpreadsheetRow({row: lessonRow, lessonId: lessonId}, columnIndices, workspaceFolderId, versionFolderId, publishFolderId);
+    Logger.log('SUCCESS: Spreadsheet row updated');
 
     Logger.log(`=== Automation completed successfully for lesson: ${lessonId} ===`);
 
@@ -661,6 +697,12 @@ function updateSpreadsheetRow(rowInfo, columnIndices, workspaceFolderId, version
   if (columnIndices[COLUMNS.LAST_PUBLISH_TIME]) {
     sheet.getRange(targetRow, columnIndices[COLUMNS.LAST_PUBLISH_TIME]).setValue(publishTime);
     Logger.log(`    - Set last_publish_time: ${publishTime}`);
+  }
+
+  // Update status to "Published"
+  if (columnIndices[COLUMNS.STATUS]) {
+    sheet.getRange(targetRow, columnIndices[COLUMNS.STATUS]).setValue(STATUS_VALUES.PUBLISHED);
+    Logger.log(`    - Set status: ${STATUS_VALUES.PUBLISHED}`);
   }
 
   Logger.log('  - SUCCESS: All columns updated');
