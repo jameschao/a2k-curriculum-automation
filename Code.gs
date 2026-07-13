@@ -56,7 +56,6 @@ function onOpen() {
   // Instantiates the top-level main menu container
   ui.createMenu('🚀 A2K Publish')
     .addItem('Publish lesson', 'publishLesson') // (Display Label, Target Function Name)
-    .addItem('Verify Folder Status', 'checkFolderStatus')
 
     // Adds a visual dividing line to group operational commands
     .addSeparator()
@@ -64,11 +63,6 @@ function onOpen() {
     // Nests a sub-menu for validation
     .addSubMenu(ui.createMenu('Validation')
       .addItem('Validate Active Sheet', 'validateActiveSheetStructure')
-    )
-
-    // Nests a sub-menu for secondary/administrative overrides
-    .addSubMenu(ui.createMenu('Advanced Utilities')
-      .addItem('Force Google Site Re-Publish', 'syncGoogleSiteOnly')
     )
 
     // Renders the built structure into the spreadsheet main header bar
@@ -80,10 +74,16 @@ function onOpen() {
 // ============================================================================
 
 /**
- * Main automation workflow:
- * 1. Validates user's current cell selection against Column A lesson names
- * 2. Creates timestamped version folder with PDFs
- * 3. Copies all files to publish folder
+ * Main automation workflow for publishing a lesson.
+ *
+ * Steps:
+ * 1. Validates sheet structure (column headers and status dropdown values)
+ * 2. Validates lesson (ID from selected row and status must be "Ready to Publish")
+ * 3. Sets status to "Publishing in Progress" and creates timestamped version folder with PDFs
+ * 4. Publishes files to publish folder
+ * 5. Updates spreadsheet row with folder URLs, timestamp, and sets status to "Published"
+ *
+ * User must have a cell selected in the lesson's row before running this function.
  */
 function publishLesson() {
   const ui = SpreadsheetApp.getUi();
@@ -218,18 +218,17 @@ function publishLesson() {
   }
 }
 
-function checkFolderStatus() {
-  SpreadsheetApp.getUi().alert('Success: Initializing Drive query checks.');
-}
-
-function syncGoogleSiteOnly() {
-  SpreadsheetApp.getUi().alert('Success: Pushing direct updates to Google Sites REST API.');
-}
-
 /**
- * Validates the sheet structure and returns validation results
+ * Validates the sheet structure and returns validation results.
+ * Checks for required column headers and status dropdown values.
+ *
  * @param {Sheet} sheet - The sheet to validate
- * @returns {Object} Validation results with isValid flag and details
+ * @returns {Object} Validation results object containing:
+ *   - isValid: boolean indicating if validation passed
+ *   - missingColumns: array of missing column names
+ *   - additionalColumns: array of extra column names (informational only)
+ *   - missingStatusValues: array of missing status dropdown values
+ *   - unexpectedStatusValues: array of unexpected status dropdown values
  */
 function performSheetValidation(sheet) {
   Logger.log('=== Starting performSheetValidation ===');
@@ -307,9 +306,10 @@ function performSheetValidation(sheet) {
 }
 
 /**
- * Formats validation results into a user-friendly message
- * @param {Object} validationResults - The validation results object
- * @returns {string} Formatted message
+ * Formats validation results into a user-friendly message for display to the user.
+ *
+ * @param {Object} validationResults - The validation results object from performSheetValidation()
+ * @returns {string} Formatted message with validation status and any issues found
  */
 function formatValidationMessage(validationResults) {
   let message = '';
@@ -351,8 +351,10 @@ function formatValidationMessage(validationResults) {
 }
 
 /**
- * Validates the active sheet for correct structure column headers and status values
- * Shows UI alert with results
+ * Validates the sheet structure and shows a UI alert with the results.
+ * This is a wrapper around performSheetValidation() that displays results to the user.
+ *
+ * @param {Sheet} sheet - The sheet to validate
  */
 function validateSheetStructure(sheet) {
   const ui = SpreadsheetApp.getUi();
@@ -379,8 +381,8 @@ function validateSheetStructure(sheet) {
 }
 
 /**
- * Validates the structure of the currently active sheet in the spreadsheet.
- * This function is intended to be called from the custom menu.
+ * Entry point for the "Validate Active Sheet" menu item.
+ * Gets the currently active sheet and validates its structure.
  */
 function validateActiveSheetStructure() {
   const sheet = SpreadsheetApp.getActiveSheet();
@@ -393,8 +395,10 @@ function validateActiveSheetStructure() {
 // ============================================================================
 
 /**
- * Gets the lesson ID from the "id" column of the currently selected row
- * @returns {string|null} The lesson ID, or null if invalid
+ * Gets the lesson ID from the "id" column of the currently selected row.
+ * Validates that a cell is selected and it's in a data row (not the header).
+ *
+ * @returns {string|null} The lesson ID if valid, or null if invalid/not selected
  */
 function getValidatedLessonName() {
   Logger.log('  - Getting current cell selection...');
@@ -437,9 +441,14 @@ function getValidatedLessonName() {
 }
 
 /**
- * Creates a timestamped version folder and generates PDFs for all Google Docs
- * @param {string} lessonId - The name of the lesson
- * @returns {Object} Object containing versionFolderId and workspaceFolderId
+ * Creates a timestamped version folder and generates PDFs for all Google Docs.
+ * Copies all files from the workspace folder to the version folder and creates
+ * a VERSION document with the timestamp in its name.
+ *
+ * @param {string} lessonId - The lesson identifier (used to find the workspace folder)
+ * @returns {Object} Object containing:
+ *   - versionFolderId: ID of the created version folder
+ *   - workspaceFolderId: ID of the source workspace folder
  */
 function createVersionFolder(lessonId) {
   Logger.log(`  - Getting versions parent folder (ID: ${PARENT_FOLDERS.VERSIONS})...`);
@@ -523,8 +532,10 @@ function createVersionFolder(lessonId) {
 }
 
 /**
- * Copies all files from the version folder to the publish folder
- * @param {string} lessonId - The name of the lesson
+ * Publishes files by copying them from the version folder to the publish folder.
+ * Deletes all existing files in the publish folder before copying new ones.
+ *
+ * @param {string} lessonId - The lesson identifier (used to find/create the publish folder)
  * @param {string} versionFolderId - The ID of the version folder to copy from
  * @returns {string} The ID of the publish folder
  */
@@ -687,8 +698,12 @@ function findLessonRow(sheet, columnIndices, lessonId) {
 }
 
 /**
- * Updates the spreadsheet row for the lesson with folder URLs and publish timestamp
- * @param {Object} rowInfo - Object containing {row: number, lessonId: string}
+ * Updates the spreadsheet row with folder URLs, publish timestamp, and status.
+ * Creates HYPERLINK formulas for folder URLs and sets the status to "Published".
+ *
+ * @param {Object} rowInfo - Object containing:
+ *   - row: The 1-indexed row number to update
+ *   - lessonId: The lesson identifier
  * @param {Object} columnIndices - Map of column names to 1-indexed column numbers
  * @param {string} workspaceFolderId - The ID of the workspace folder
  * @param {string} versionFolderId - The ID of the version folder
