@@ -1,19 +1,19 @@
 // ============================================================================
-// CONFIGURATION - Drive Folder IDs
+// CONFIGURATION - Drive Folder URLs
 // ============================================================================
-// To find a folder ID: Open the folder in Drive, copy the ID from the URL
-// URL format: https://drive.google.com/drive/folders/{FOLDER_ID_HERE}
+// To find a folder URL: Open the folder in Drive, copy the full URL
+// URL format: https://drive.google.com/drive/folders/{FOLDER_ID}
 
 // TODO: change these to be dynamic based on the grade level or series
 const PARENT_FOLDERS = {
   // Parent folder containing all lesson workspace folders
-  WORKSPACES_ROOT: '1UetXJ8BXSvkjadKsve0pLGCVkipN52b8',
+  WORKSPACES_ROOT: 'https://drive.google.com/drive/folders/1UetXJ8BXSvkjadKsve0pLGCVkipN52b8?usp=drive_link',
 
   // Parent folder containing all lesson version folders
-  VERSIONS_ROOT: '1acCgaNU88gnyp4sqd-Cr9duLUjkipfgT',
+  VERSIONS_ROOT: 'https://drive.google.com/drive/folders/1acCgaNU88gnyp4sqd-Cr9duLUjkipfgT?usp=drive_link',
 
   // Parent folder containing all lesson published folders
-  PUBLISHED_ROOT: '1cEzXD5bo0nkbUfZNeoENQQruPqJsdp_a'
+  PUBLISHED_ROOT: 'https://drive.google.com/drive/folders/1cEzXD5bo0nkbUfZNeoENQQruPqJsdp_a?usp=drive_link'
 };
 
 // ============================================================================
@@ -93,6 +93,15 @@ function publishLesson() {
   Logger.log('=== Starting publishLesson ===');
 
   try {
+    // Parse folder URLs into context object
+    Logger.log('Parsing parent folder URLs...');
+    const context = {
+      workspacesRootId: parseFolderId(PARENT_FOLDERS.WORKSPACES_ROOT),
+      versionsRootId: parseFolderId(PARENT_FOLDERS.VERSIONS_ROOT),
+      publishedRootId: parseFolderId(PARENT_FOLDERS.PUBLISHED_ROOT)
+    };
+    Logger.log('SUCCESS: All parent folder URLs parsed');
+
     const sheet = SpreadsheetApp.getActiveSheet();
 
     // Step 1: Validate sheet structure
@@ -185,13 +194,13 @@ function publishLesson() {
     // Step 3: Create timestamped version folder with PDFs
     ss.toast('Creating version folder and generating PDFs...', '📁 Step 3/4', 5);
     Logger.log('Step 3: Creating version folder and generating PDFs...');
-    const {versionFolderId, workspaceFolderId} = createVersionFolder(lessonId);
+    const {versionFolderId, workspaceFolderId} = createVersionFolder(lessonId, context);
     Logger.log(`SUCCESS: Version folder created with ID: ${versionFolderId}`);
 
     // Step 4: Publish files to publish folder
     ss.toast('Publishing files to publish folder...', '🚀 Step 4/4', 5);
     Logger.log('Step 4: Publishing files to publish folder...');
-    const publishFolderId = publishVersionFiles(lessonId, versionFolderId);
+    const publishFolderId = publishVersionFiles(lessonId, versionFolderId, context);
     Logger.log('SUCCESS: Files published successfully');
 
     // Update spreadsheet row with folder URLs, timestamp, and status
@@ -396,6 +405,36 @@ function validateActiveSheetStructure() {
 // ============================================================================
 
 /**
+ * Parses a Google Drive folder URL and extracts the folder ID.
+ *
+ * @param {string} url - A Google Drive folder URL
+ * @returns {string} The folder ID
+ * @throws {Error} If the URL format is invalid
+ *
+ * Supported formats:
+ * - https://drive.google.com/drive/folders/FOLDER_ID
+ * - https://drive.google.com/drive/folders/FOLDER_ID?usp=drive_link
+ */
+function parseFolderId(url) {
+  if (!url || typeof url !== 'string') {
+    throw new Error('Folder URL is required');
+  }
+
+  const trimmed = url.trim();
+
+  // Parse URL and extract folder ID
+  // Format: https://drive.google.com/drive/folders/FOLDER_ID
+  // or:     https://drive.google.com/drive/folders/FOLDER_ID?usp=drive_link
+  const match = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+
+  if (!match) {
+    throw new Error(`Invalid Google Drive folder URL format: ${trimmed}`);
+  }
+
+  return match[1];
+}
+
+/**
  * Gets the lesson ID from the "id" column of the currently selected row.
  * Validates that a cell is selected and it's in a data row (not the header).
  *
@@ -447,13 +486,17 @@ function getValidatedLessonName() {
  * a VERSION document with the timestamp in its name.
  *
  * @param {string} lessonId - The lesson identifier (used to find the workspace folder)
+ * @param {Object} context - Context object containing parsed folder IDs:
+ *   - workspacesRootId: ID of the workspaces parent folder
+ *   - versionsRootId: ID of the versions parent folder
+ *   - publishedRootId: ID of the published parent folder
  * @returns {Object} Object containing:
  *   - versionFolderId: ID of the created version folder
  *   - workspaceFolderId: ID of the source workspace folder
  */
-function createVersionFolder(lessonId) {
-  Logger.log(`  - Getting versions parent folder (ID: ${PARENT_FOLDERS.VERSIONS_ROOT})...`);
-  const versionsParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.VERSIONS_ROOT);
+function createVersionFolder(lessonId, context) {
+  Logger.log(`  - Getting versions parent folder (ID: ${context.versionsRootId})...`);
+  const versionsParentFolder = DriveApp.getFolderById(context.versionsRootId);
   Logger.log(`  - SUCCESS: Found versions parent folder: "${versionsParentFolder.getName()}"`);
 
   // Get or create the lesson's versions folder
@@ -470,8 +513,8 @@ function createVersionFolder(lessonId) {
   Logger.log(`  - SUCCESS: Version folder created`);
 
   // Get the lesson's workspace folder
-  Logger.log(`  - Getting workspace parent folder (ID: ${PARENT_FOLDERS.WORKSPACES_ROOT})...`);
-  const workspaceParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.WORKSPACES_ROOT);
+  Logger.log(`  - Getting workspace parent folder (ID: ${context.workspacesRootId})...`);
+  const workspaceParentFolder = DriveApp.getFolderById(context.workspacesRootId);
   Logger.log(`  - Finding workspace folder for lesson: "${lessonId}"...`);
 
   const workspaceFolders = workspaceParentFolder.getFoldersByName(lessonId);
@@ -538,15 +581,19 @@ function createVersionFolder(lessonId) {
  *
  * @param {string} lessonId - The lesson identifier (used to find/create the publish folder)
  * @param {string} versionFolderId - The ID of the version folder to copy from
+ * @param {Object} context - Context object containing parsed folder IDs:
+ *   - workspacesRootId: ID of the workspaces parent folder
+ *   - versionsRootId: ID of the versions parent folder
+ *   - publishedRootId: ID of the published parent folder
  * @returns {string} The ID of the publish folder
  */
-function publishVersionFiles(lessonId, versionFolderId) {
+function publishVersionFiles(lessonId, versionFolderId, context) {
   Logger.log(`  - Getting version folder (ID: ${versionFolderId})...`);
   const versionFolder = DriveApp.getFolderById(versionFolderId);
   Logger.log(`  - SUCCESS: Found version folder`);
 
-  Logger.log(`  - Getting published parent folder (ID: ${PARENT_FOLDERS.PUBLISHED_ROOT})...`);
-  const publishedParentFolder = DriveApp.getFolderById(PARENT_FOLDERS.PUBLISHED_ROOT);
+  Logger.log(`  - Getting published parent folder (ID: ${context.publishedRootId})...`);
+  const publishedParentFolder = DriveApp.getFolderById(context.publishedRootId);
   Logger.log(`  - SUCCESS: Found published parent folder: "${publishedParentFolder.getName()}"`);
 
   // Get or create the lesson's published folder
