@@ -215,6 +215,11 @@ function publishLesson() {
     // Step 3: Create timestamped version folder with PDFs
     ss.toast('Creating version folder and generating PDFs...', '📁 Step 3/4', 5);
     Logger.log('Step 3: Creating version folder and generating PDFs...');
+
+    // Pass row info and column indices to createVersionFolder for immediate updates
+    context.rowInfo = {row: lessonRow, lessonId: lessonId};
+    context.columnIndices = columnIndices;
+
     const {versionFolderId, workspaceFolderId} = createVersionFolder(lessonId, context);
     Logger.log(`SUCCESS: Version folder created with ID: ${versionFolderId}`);
 
@@ -224,10 +229,10 @@ function publishLesson() {
     const publishFolderId = publishVersionFiles(lessonId, versionFolderId, context);
     Logger.log('SUCCESS: Files published successfully');
 
-    // Update spreadsheet row with folder URLs, timestamp, and status
-    Logger.log('Updating spreadsheet row...');
-    updateSpreadsheetRow({row: lessonRow, lessonId: lessonId}, columnIndices, workspaceFolderId, versionFolderId, publishFolderId);
-    Logger.log('SUCCESS: Spreadsheet row updated');
+    // Update final publishing fields (publish folder, timestamp, status)
+    Logger.log('Updating final publishing fields...');
+    updatePublishingFields({row: lessonRow, lessonId: lessonId}, columnIndices, workspaceFolderId, versionFolderId, publishFolderId);
+    Logger.log('SUCCESS: Final publishing fields updated');
 
     Logger.log(`=== Automation completed successfully for lesson: ${lessonId} ===`);
 
@@ -822,11 +827,35 @@ function getValidatedLessonName() {
  *   - workspacesRootId: ID of the workspaces parent folder
  *   - versionsRootId: ID of the versions parent folder
  *   - publishedRootId: ID of the published parent folder
+ *   - rowInfo: Object with row number and lessonId for updating spreadsheet
+ *   - columnIndices: Map of column names to indices for updating spreadsheet
  * @returns {Object} Object containing:
  *   - versionFolderId: ID of the created version folder
  *   - workspaceFolderId: ID of the source workspace folder
  */
 function createVersionFolder(lessonId, context) {
+  // Get the lesson's workspace folder first
+  Logger.log(`  - Getting workspace parent folder (ID: ${context.workspacesRootId})...`);
+  const workspaceParentFolder = DriveApp.getFolderById(context.workspacesRootId);
+  Logger.log(`  - Finding workspace folder for lesson: "${lessonId}"...`);
+
+  const workspaceFolders = workspaceParentFolder.getFoldersByName(lessonId);
+
+  if (!workspaceFolders.hasNext()) {
+    Logger.log(`  - FAILED: Workspace folder not found for lesson: "${lessonId}"`);
+    throw new Error(`Workspace folder not found for lesson: ${lessonId}`);
+  }
+
+  const workspaceFolder = workspaceFolders.next();
+  Logger.log(`  - SUCCESS: Found workspace folder`);
+
+  // Update workspace folder URL in spreadsheet immediately
+  if (context.rowInfo && context.columnIndices) {
+    Logger.log(`  - Updating workspace folder URL in spreadsheet...`);
+    updateWorkspaceFolderCell(context.rowInfo.row, context.columnIndices, workspaceFolder.getId());
+    Logger.log(`  - SUCCESS: Workspace folder URL updated`);
+  }
+
   Logger.log(`  - Getting versions parent folder (ID: ${context.versionsRootId})...`);
   const versionsParentFolder = DriveApp.getFolderById(context.versionsRootId);
   Logger.log(`  - SUCCESS: Found versions parent folder: "${versionsParentFolder.getName()}"`);
@@ -844,20 +873,12 @@ function createVersionFolder(lessonId, context) {
   const versionFolder = lessonVersionsFolder.createFolder(versionId);
   Logger.log(`  - SUCCESS: Version folder created`);
 
-  // Get the lesson's workspace folder
-  Logger.log(`  - Getting workspace parent folder (ID: ${context.workspacesRootId})...`);
-  const workspaceParentFolder = DriveApp.getFolderById(context.workspacesRootId);
-  Logger.log(`  - Finding workspace folder for lesson: "${lessonId}"...`);
-
-  const workspaceFolders = workspaceParentFolder.getFoldersByName(lessonId);
-
-  if (!workspaceFolders.hasNext()) {
-    Logger.log(`  - FAILED: Workspace folder not found for lesson: "${lessonId}"`);
-    throw new Error(`Workspace folder not found for lesson: ${lessonId}`);
+  // Update version folder URL in spreadsheet immediately
+  if (context.rowInfo && context.columnIndices) {
+    Logger.log(`  - Updating version folder URL in spreadsheet...`);
+    updateVersionFolderCell(context.rowInfo.row, context.columnIndices, versionFolder.getId(), versionId);
+    Logger.log(`  - SUCCESS: Version folder URL updated`);
   }
-
-  const workspaceFolder = workspaceFolders.next();
-  Logger.log(`  - SUCCESS: Found workspace folder`);
 
   // Copy all files from workspace to version folder, generating PDFs for Google Docs
   Logger.log(`  - Copying files and generating PDFs...`);
@@ -1078,31 +1099,72 @@ function findLessonRow(sheet, columnIndices, lessonId) {
 }
 
 /**
- * Updates the spreadsheet row with folder URLs, publish timestamp, and status.
- * Creates HYPERLINK formulas for folder URLs and sets the status to "Published".
+ * Updates the workspace folder URL cell in the spreadsheet.
+ * Creates a HYPERLINK formula for the workspace folder.
+ *
+ * @param {number} targetRow - The 1-indexed row number to update
+ * @param {Object} columnIndices - Map of column names to 1-indexed column numbers
+ * @param {string} workspaceFolderId - The ID of the workspace folder
+ */
+function updateWorkspaceFolderCell(targetRow, columnIndices, workspaceFolderId) {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const workspaceFolder = DriveApp.getFolderById(workspaceFolderId);
+  const workspaceUrl = workspaceFolder.getUrl();
+
+  if (columnIndices[COLUMNS.WORKSPACE_FOLDER_URL]) {
+    const workspaceFormula = `=HYPERLINK("${workspaceUrl}", "folder")`;
+    sheet.getRange(targetRow, columnIndices[COLUMNS.WORKSPACE_FOLDER_URL]).setFormula(workspaceFormula);
+    SpreadsheetApp.flush(); // Force the update to be visible immediately
+    Logger.log(`    - Set workspace_folder_url`);
+  }
+}
+
+/**
+ * Updates the version folder URL cell in the spreadsheet.
+ * Creates a HYPERLINK formula for the version folder with the timestamp as display text.
+ *
+ * @param {number} targetRow - The 1-indexed row number to update
+ * @param {Object} columnIndices - Map of column names to 1-indexed column numbers
+ * @param {string} versionFolderId - The ID of the version folder
+ * @param {string} versionTimestamp - The version timestamp (folder name)
+ */
+function updateVersionFolderCell(targetRow, columnIndices, versionFolderId, versionTimestamp) {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const versionFolder = DriveApp.getFolderById(versionFolderId);
+  const versionUrl = versionFolder.getUrl();
+
+  if (columnIndices[COLUMNS.LATEST_VERSION_FOLDER_URL]) {
+    const versionFormula = `=HYPERLINK("${versionUrl}", "${versionTimestamp}")`;
+    sheet.getRange(targetRow, columnIndices[COLUMNS.LATEST_VERSION_FOLDER_URL]).setFormula(versionFormula);
+    SpreadsheetApp.flush(); // Force the update to be visible immediately
+    Logger.log(`    - Set latest_version_folder_url with timestamp: ${versionTimestamp}`);
+  }
+}
+
+/**
+ * Updates the final publishing fields: publish folder URL, timestamp, and status.
+ * Creates HYPERLINK formula for publish folder and sets the status to "Published".
+ * Note: Workspace and version folder URLs are updated earlier in the process.
  *
  * @param {Object} rowInfo - Object containing:
  *   - row: The 1-indexed row number to update
  *   - lessonId: The lesson identifier
  * @param {Object} columnIndices - Map of column names to 1-indexed column numbers
- * @param {string} workspaceFolderId - The ID of the workspace folder
- * @param {string} versionFolderId - The ID of the version folder
+ * @param {string} workspaceFolderId - The ID of the workspace folder (not used, kept for compatibility)
+ * @param {string} versionFolderId - The ID of the version folder (used for timestamp)
  * @param {string} publishFolderId - The ID of the publish folder
  */
-function updateSpreadsheetRow(rowInfo, columnIndices, workspaceFolderId, versionFolderId, publishFolderId) {
+function updatePublishingFields(rowInfo, columnIndices, workspaceFolderId, versionFolderId, publishFolderId) {
   const sheet = SpreadsheetApp.getActiveSheet();
   const targetRow = rowInfo.row;
   const lessonId = rowInfo.lessonId;
 
-  Logger.log(`  - Updating row ${targetRow} for lesson: "${lessonId}"`);
+  Logger.log(`  - Updating final publishing fields in row ${targetRow} for lesson: "${lessonId}"`);
 
   // Get folder objects and URLs
-  const workspaceFolder = DriveApp.getFolderById(workspaceFolderId);
   const versionFolder = DriveApp.getFolderById(versionFolderId);
   const publishFolder = DriveApp.getFolderById(publishFolderId);
 
-  const workspaceUrl = workspaceFolder.getUrl();
-  const versionUrl = versionFolder.getUrl();
   const publishUrl = publishFolder.getUrl();
   const versionTimestamp = versionFolder.getName(); // The folder name IS the version ID
 
@@ -1111,27 +1173,16 @@ function updateSpreadsheetRow(rowInfo, columnIndices, workspaceFolderId, version
   // ISO format:        yyyy-MM-ddTHH:mm:ss
   const publishTime = versionTimestamp.replace('_', 'T');
 
-  Logger.log('  - Creating hyperlinked formulas...');
+  Logger.log('  - Setting publish folder URL, timestamp, and status...');
 
-  // Update the cells with hyperlinked formulas
-  if (columnIndices[COLUMNS.WORKSPACE_FOLDER_URL]) {
-    const workspaceFormula = `=HYPERLINK("${workspaceUrl}", "folder")`;
-    sheet.getRange(targetRow, columnIndices[COLUMNS.WORKSPACE_FOLDER_URL]).setFormula(workspaceFormula);
-    Logger.log(`    - Set workspace_folder_url`);
-  }
-
-  if (columnIndices[COLUMNS.LATEST_VERSION_FOLDER_URL]) {
-    const versionFormula = `=HYPERLINK("${versionUrl}", "${versionTimestamp}")`;
-    sheet.getRange(targetRow, columnIndices[COLUMNS.LATEST_VERSION_FOLDER_URL]).setFormula(versionFormula);
-    Logger.log(`    - Set latest_version_folder_url with timestamp: ${versionTimestamp}`);
-  }
-
+  // Update publish folder URL
   if (columnIndices[COLUMNS.PUBLISH_FOLDER_URL]) {
     const publishFormula = `=HYPERLINK("${publishUrl}", "folder")`;
     sheet.getRange(targetRow, columnIndices[COLUMNS.PUBLISH_FOLDER_URL]).setFormula(publishFormula);
     Logger.log(`    - Set publish_folder_url`);
   }
 
+  // Update publish timestamp
   if (columnIndices[COLUMNS.LAST_PUBLISH_TIME]) {
     sheet.getRange(targetRow, columnIndices[COLUMNS.LAST_PUBLISH_TIME]).setValue(publishTime);
     Logger.log(`    - Set last_publish_time: ${publishTime}`);
@@ -1145,5 +1196,5 @@ function updateSpreadsheetRow(rowInfo, columnIndices, workspaceFolderId, version
 
   SpreadsheetApp.flush(); // Force the update to be visible immediately
 
-  Logger.log('  - SUCCESS: All columns updated');
+  Logger.log('  - SUCCESS: All final publishing fields updated');
 }
